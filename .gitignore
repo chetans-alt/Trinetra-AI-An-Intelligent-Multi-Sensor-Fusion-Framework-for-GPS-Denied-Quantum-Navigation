@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+datasets/raw/
+datasets/processed/
+*.parquet
+*.h5
+*.hdf5
+mlruns/
+.env
