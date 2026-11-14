@@ -22,7 +22,8 @@ This is the author's single portfolio and research project, aimed at sensor-fusi
 Read these before planning work. Where they disagree with this file, this file wins.
 
 - **`deep-research-report.md`** (in the repo): overview, reading list and 16-week plan. See the corrections below.
-- **Knowledge-source PDFs, provided by the user and not yet in the repo:**
+- **[docs/knowledge/](docs/knowledge/README.md):** condensed markdown notes of every knowledge-source document below, with corrections marked inline. Read these instead of the PDFs.
+- **Knowledge-source PDFs, provided by the user (originals not in the repo):**
   - **Phase notes:** `trinetra_math_notes` (phase 1), `phase4_ts`, `phase5_dsp`, `phase6_sensors`, `phase7_fusion`, `phase8_navigation`, `phase9_ai`, `phase10_ros2`, `phase11_data` and `phase13_se`.
   - **`trinetra_architecture`:** the software design.
   - **`trinetra_prd_build`:** the product requirements and the step-by-step build guide.
