@@ -27,7 +27,7 @@ Record each used dataset's licence in `datasets/README.md`.
 
 | Work | Authors, year |
 |---|---|
-| A New Approach to Linear Filtering and Prediction | Kalman, 1960 |
+| A New Approach to Linear Filtering and Prediction | Kalman, Trans. ASME J. Basic Eng. 82(D):35–45, 1960 — reviewed in [../literature-review.md](../literature-review.md) |
 | A New Extension of the KF to Nonlinear Systems (UKF) | Julier & Uhlmann, 1997 |
 | The Unscented KF for Nonlinear Estimation | Wan & van der Merwe, 2000 |
 | Novel approach to nonlinear/non-Gaussian Bayesian state estimation (PF) | Gordon, Salmond & Smith, 1993 |

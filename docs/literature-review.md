@@ -4,6 +4,7 @@ How each paper informs Trinetra-AI's three stages: **compensate → match → fu
 
 | # | Paper | Theme |
 |---|---|---|
+| A0 | Kalman, *A New Approach to Linear Filtering and Prediction Problems*, Trans. ASME J. Basic Eng. 82(D), 1960 | estimation foundations: the original Kalman filter |
 | A1 | Pei, Biswas, Fussell & Pingali, *An Elementary Introduction to Kalman Filtering*, arXiv:1710.04055 (v5, 2019) | estimation foundations: fusion (ESKF) |
 | A2 | Arulampalam, Maskell, Gordon & Clapp, *A Tutorial on Particle Filters for Online Nonlinear/Non-Gaussian Bayesian Tracking*, IEEE TSP 50(2), 2002 | estimation foundations: map matching (particle filter) |
 | A3 | Thrun, *Probabilistic Algorithms in Robotics*, CMU-CS-00-126, 2000; and Thrun, *Probabilistic Robotics*, Comm. ACM 45(3), 2002 | framing: Bayes filters, Monte Carlo localisation |
@@ -15,6 +16,71 @@ The two Thrun documents overlap heavily: the CACM article is a short version of 
 ---
 
 # Part A: Estimation foundations
+
+## A0. Kalman (1960): a new approach to linear filtering and prediction problems
+
+**Citation.** R. E. Kalman, "A New Approach to Linear Filtering and Prediction Problems," *Transactions of the ASME, Journal of Basic Engineering*, 82 (Series D):35–45, 1960.
+
+The copy we have is a 2002 retyped transcription by J. Lukesh. The transcriber notes that equation (32) may contain an ordering error, so cite the original and take the equations from it or from A1.
+
+### Problem
+
+The **Wiener filter** was the standard method for estimating a signal from noisy measurements. Kalman lists four practical limits:
+1. The filter is specified only by its impulse response, which is hard to turn into a working filter.
+2. Computing that impulse response numerically is involved and poorly suited to computers.
+3. Every extension, such as nonstationary statistics or finite data, needs a new derivation.
+4. The underlying assumptions are hidden in the mathematics.
+
+### Method
+
+The paper makes three moves.
+
+- **Optimal estimation as conditional expectation.**
+  - **Theorem 1:** for symmetric, unimodal conditional distributions (Gaussian ones included), the conditional mean minimises *any* reasonable loss.
+  - **Theorem 2:** the estimate is the **orthogonal projection** of the state onto the space spanned by the measurements. This holds if the processes are Gaussian, *or* if the estimator is restricted to be linear with squared-error loss.
+  - Only first- and second-order statistics (means and covariances) are ever needed.
+- **State-space models.** A random signal is modelled as the output of a linear system driven by white Gaussian noise: x(t+1) = Φx(t) + u(t), y(t) = Mx(t), with noise covariance Q.
+  - **Coloured noise is handled by adding it to the state.** In Example 2, the measurement noise is a Gauss–Markov state (x₃ with coefficient φ₃₃), estimated alongside position and velocity.
+- **Theorem 3: the recursive filter.** It is written as a one-step predictor:
+  - gain Δ* = ΦP*Mᵀ(MP*Mᵀ)⁻¹;
+  - closed-loop transition Φ* = Φ − Δ*M;
+  - covariance update P*(t+1) = Φ*P*Φᵀ + Q.
+  - Eliminating the gain gives a nonlinear (Riccati) equation for P*, which replaces the Wiener–Hopf integral equation.
+
+### Key findings
+
+- **One derivation covers everything:** stationary and nonstationary statistics, and finite or infinite data.
+- **The filter's gain follows from its covariance P\*.** Once P\* is known, no further calculation is needed.
+- **Innovations are white (Remark m).** The innovation sequence ỹ(t|t−1) = y − Mx\* is uncorrelated over time. The optimal filter is a feedback system driven by white noise.
+- **Linear estimation is hard to beat.** It can be improved on *only* when the processes are non-Gaussian, and even then only by using third- or higher-order statistics.
+- **Conditions for the recursion to work:**
+  - **P\*(t₀) and Q must be specified.** If Q is positive definite, every P\* stays positive definite.
+  - **No measurement may be a linear combination of the others,** or MP\*Mᵀ cannot be inverted.
+- **Duality (Theorem 4).** Estimation is the mathematical dual of the noise-free optimal regulator (control) problem; both reduce to the same Riccati equation.
+- **The model is assumed, not learned.** Obtaining Φ and Q from data is called "a subtle and presently largely unsolved problem". Kalman knows of no study that optimises the model and the filter jointly.
+
+### Limitations
+
+- The paper covers linear systems only. The extended Kalman filter (EKF) came later; see A1 and A2.
+- There is no separate measurement-noise term. Noise is modelled as part of the state, unlike the modern form, which adds R.
+- Stability and convergence of the filter are deferred to a later paper.
+- Φ and Q are assumed known exactly.
+- The examples are analytical; there is no real data.
+
+### What Trinetra-AI takes from it
+
+1. **The research gap is 60 years old.** Kalman calls identifying the noise model "largely unsolved" and notes that nobody had optimised the model and the filter together. Learned compensation and learned R are modern attempts at exactly that joint problem, which makes this a strong framing citation for the thesis introduction.
+2. **White innovations are the basis of our feedback loop.** If the filter's model is right, the innovations are white. Any structure left in them (correlation over time, wrong magnitude) is a signal that Q or R is wrong. Two consequences:
+   - **Diagnostics:** add innovation-whiteness checks (autocorrelation) alongside NIS.
+   - **Justification for AI module 2:** using innovations as its input (the C5 → C4 loop) learns from exactly the signal Kalman's theory says should be white.
+3. **Coloured noise becomes a state.** Example 2 is the same trick as Canciani's FOGM temporal-variation state (B1) and the IMU bias states in the ESKF. This paper is the original source for that design.
+4. **Numerical rules for the code:**
+   - Keep Q positive definite and never set it to zero; this keeps P positive definite (already in the test plan) and avoids the particle collapse A2 warns about.
+   - Don't feed linearly dependent measurement channels, such as duplicate magnetometer components, unless R > 0 keeps the innovation covariance invertible.
+5. **Nonlinear filtering needs a non-Gaussian problem to pay off.** A nonlinear filter beats a linear one only when the problem is non-Gaussian. Magnetic map matching has several peaks, so it is non-Gaussian; this supports the particle filter for matching (A2) while keeping the ESKF for single-peaked inertial fusion.
+6. **Out of scope:** the estimation–control duality, noted only as background.
+
+---
 
 ## A1. Pei et al. (2019): an elementary introduction to Kalman filtering
 
@@ -334,6 +400,7 @@ Indoor magnetic positioning methods couldn't be compared fairly, because earlier
 Canciani shows that map matching works when the magnetometer signal is clean. MagPIE shows that real fields are disturbed and that maps have uncertainty. Neither paper measures how much **learned compensation of real platform interference**, combined with **uncertainty-aware trust in each fix**, improves end-to-end navigation error during a GPS outage. That is Trinetra-AI's central question.
 
 The foundations papers explain *why* this gap matters:
+- **A0:** learning the noise model was already an open problem in 1960, and white innovations are the test of whether it is right.
 - **A1:** a filter's weights are only as good as its stated noise.
 - **A2:** EKFs become overconfident on beliefs with several peaks, and particle filters are sensitive to outliers.
 - **A3:** probabilistic models need only be approximately right, and learning them is the open problem.
@@ -345,7 +412,9 @@ The foundations papers explain *why* this gap matters:
 | Classical map-matching baseline: Canciani's five-state particle filter with a temporal-variation state | B1 |
 | Resample systematically when N̂_eff < N_T, not every step; regularised particle filter if particles collapse; log N̂_eff | A2 |
 | Send the particle filter's fix to the ESKF only when the belief has a single peak; R from particle spread, refined by AI module 2 | A2, A1 |
-| Track IMU bias and temporal variations as states, because the filter's optimality assumes unbiased inputs | A1, B1 |
+| Track IMU bias and temporal variations as states, because the filter's optimality assumes unbiased inputs | A0, A1, B1 |
+| Check innovation whiteness (autocorrelation) alongside NIS; feed innovations to AI module 2 | A0 |
+| Keep Q positive definite; don't fuse linearly dependent measurement channels | A0 |
 | Check that the particle filter → ESKF cascade passes NEES/NIS, because its noises are correlated | A1, B1 |
 | Report horizontal RMS error grouped by altitude alongside ATE/drift, so results are comparable with Canciani | B1 |
 | Ablation: EKF vs particle-filter map matching | A2 |
