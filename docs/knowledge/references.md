@@ -42,6 +42,8 @@ Record each used dataset's licence in `datasets/README.md`.
 | Monte Carlo Localization | Dellaert, Fox, Burgard & Thrun, ICRA 1999 |
 | Hidden Markov Map Matching Through Noise and Sparseness | Newson & Krumm, ACM GIS 2009 |
 | Quaternion kinematics for the error-state KF | Solà, arXiv 1711.02508 (from CLAUDE.md plan) |
+| Absolute Positioning Using the Earth's Magnetic Anomaly Field | Canciani & Raquet, NAVIGATION (ION) 2016 — reviewed in [../literature-review.md](../literature-review.md) |
+| MagPIE: A Dataset for Indoor Positioning with Magnetic Anomalies | Hanley et al., IPIN 2017 — reviewed in [../literature-review.md](../literature-review.md) |
 | Kalman and Bayesian Filters in Python (book) | Labbe (from CLAUDE.md plan) |
 
 ## Papers — learned inertial / fusion (most relevant)
