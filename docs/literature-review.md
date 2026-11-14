@@ -10,6 +10,8 @@ How each paper informs Trinetra-AI's three stages: **compensate → match → fu
 | A3 | Thrun, *Probabilistic Algorithms in Robotics*, CMU-CS-00-126, 2000; and Thrun, *Probabilistic Robotics*, Comm. ACM 45(3), 2002 | framing: Bayes filters, Monte Carlo localisation |
 | B1 | Canciani & Raquet, *Absolute Positioning Using the Earth's Magnetic Anomaly Field*, NAVIGATION (ION), 2016 | magnetic navigation (airborne) |
 | B2 | Hanley et al., *MagPIE: A Dataset for Indoor Positioning with Magnetic Anomalies*, IPIN 2017 | magnetic navigation (indoor dataset) |
+| C1 | Saputra, Lu, de Gusmão, Wang, Markham & Trigoni, *Graph-based Thermal-Inertial SLAM with Probabilistic Neural Networks*, arXiv:2104.07196 (v3, 2021) | learned measurement uncertainty inside a classical estimator |
+| C2 | Kipf & Welling, *Semi-Supervised Classification with Graph Convolutional Networks*, ICLR 2017 | graph neural networks (future work) |
 
 The two Thrun documents overlap heavily: the CACM article is a short version of the technical report. They are reviewed together as A3.
 
@@ -381,6 +383,139 @@ Indoor magnetic positioning methods couldn't be compared fairly, because earlier
 
 ---
 
+# Part C: Learned models inside estimators
+
+## C1. Saputra et al. (2021): graph-based thermal-inertial SLAM with probabilistic neural networks
+
+**Citation.** M. R. U. Saputra, C. X. Lu, P. P. B. de Gusmão, B. Wang, A. Markham and N. Trigoni, "Graph-based Thermal-Inertial SLAM with Probabilistic Neural Networks," arXiv:2104.07196v3, 2021 (University of Oxford). The PDF uses a journal template but names no venue, so confirm where it was published before citing. Code: github.com/risqiutama/ti-slam.
+
+### Problem
+
+Navigate where cameras and lidar fail: darkness, smoke and dust. Thermal cameras still work there, but their images are low-contrast and nearly textureless, so classical feature tracking loses track. The camera also pauses for 0.5–1 s now and then to recalibrate itself (non-uniformity correction).
+
+### Method
+
+The system has a learned front end and a classical back end.
+
+- **Front end:** three neural networks turn sensor data into constraints for the optimiser.
+  - **Neural thermal-inertial odometry** estimates the motion between frames.
+    - **Inputs:** 14-bit thermal images and the IMU.
+    - **Network:** a feature extractor, a "hallucination" branch that imitates RGB-camera features, a selective-fusion mask that re-weights features by how reliable each source is at that moment, and two stacked LSTM layers.
+    - **Output:** a **mixture density network (MDN)**. Each pose component is a Gaussian mixture, with a mean, a variance and mixing weights.
+  - **Neural embedding** (ResNet50, 128-dimensional vector per image, trained with a triplet loss) detects when the robot revisits a place. Its training labels come from the RGB camera.
+  - **Neural loop closure** estimates the relative pose between revisited places, using the same mixture-density output.
+- **Back end:** robust pose-graph optimisation (g2o, Levenberg–Marquardt).
+  - **Objective (their eq. 7):** Σ‖odometry residual‖² weighted by ϱΣ̂, plus Σ‖loop-closure residual‖² weighted by ρΛ̂. In other words, **the network's predicted variances become the measurement covariances**.
+  - **Outlier rejection:** pairs of loop closures are checked for geometric consistency (an extension of GraphTinker), and any that disagree are dropped.
+- **Training:**
+  - A Huber loss protects the hallucination branch from outliers during the camera's recalibration pauses.
+  - The mixture-density networks are trained by negative log-likelihood.
+  - The predicted variances get **no direct supervision**.
+
+### Results
+
+| Test | Odometry only ATE | Full SLAM ATE | Gain |
+|---|---|---|---|
+| Ground robot, 13 sequences | 0.609 m | **0.281 m** | 53.9 % |
+| Handheld, 8 sequences | 4.397 m | **1.334 m** | 62.8 % |
+| SubT tunnel, 54 min | 32.05 m | **19.28 m** | about 40 % |
+
+**Ablation: learned covariance vs identity covariance** (sequence 43, odometry ATE 0.592 m):
+
+| Covariance used | SLAM ATE | Gain |
+|---|---|---|
+| identity for both odometry and loops | 0.348 m | 41.3 % |
+| learned for odometry only | 0.172 m | 71.1 % |
+| learned for loop closures only | 0.221 m | 62.2 % |
+| **learned for both** | **0.121 m** | **79.5 %** |
+
+**Other findings:**
+- **Number of mixture components (K):** 10 gave the best ATE (0.609 m), compared with 0.793 m for a single Gaussian (K = 1). Above 10, accuracy got worse.
+- **Uncertainty tracks error.** Predicted variance correlates with the actual error and rises during sharp turns and U-turns; errors mostly stay inside the 3σ bounds.
+- **Selective fusion adapts to conditions.** When the thermal image has no contrast (a poster at wall temperature), the fusion mask shifts weight to the IMU.
+
+### Limitations
+
+- **The learned variances are not calibrated as they come out.** They need hand-tuned scale factors (ϱ = 0.01, ρ = 3). The authors show that results depend on ρ, and they name "training a model to predict the back-end parameters" as future work.
+  - Uncertainty is checked only by correlation and 3σ plots; there is no NEES or NIS test.
+  - The covariance is diagonal, assuming the pose components are independent.
+- **Not real time.** The model has 273 M parameters (547 MB) and takes about 0.5 s per inference on a CPU, so the system runs offline. It reaches 26 Hz only on a TITAN V GPU.
+- **Poor transfer.** The networks must be fine-tuned whenever sensor placement changes (domain shift).
+- **Weak ground truth.** Most test data uses lidar SLAM or wheel odometry as stand-in ground truth; the smoke test is qualitative only.
+- **Rotations use Euler angles,** which is safe only for near-planar motion.
+
+### What Trinetra-AI takes from it
+
+1. **The strongest direct evidence for AI module 2.** Replacing fixed (identity) covariances with learned, input-dependent ones cut the optimised ATE from 0.348 m to 0.121 m. That is the mechanism Trinetra-AI proposes: learned R for map-match fixes inside the ESKF. Cite it as precedent, in a different sensor domain.
+2. **Its gap is our contribution.** Their variances needed hand-tuned scaling and were never checked for consistency. Trinetra-AI should:
+   - calibrate the learned R, by fitting the network on NIS or innovation likelihood, or with a single learned scale;
+   - report NEES/NIS to show the variances are consistent, not just correlated with error.
+
+   This answers the authors' own future-work item on learning the back-end weights.
+3. **A training recipe for learned compensation.**
+   - Fit the noise model by negative log-likelihood. A network that outputs mean plus variance (heteroscedastic regression) gives AI module 1 a corrected field *and* its uncertainty, which can feed straight into R.
+   - Use a Huber loss for transient interference events, such as manoeuvres or switching on a radio, much as they used it for the camera's calibration pauses.
+4. **Mixture outputs for map ambiguity.** An MDN can represent position beliefs with several peaks. It is a possible learned alternative to the particle filter; this is out of scope for now, so the particle filter stays (A2).
+5. **Gate fixes before fusing them.** Their consistency-based loop-closure rejection is the same idea as gating map-match fixes. It supports a geometric or innovation gate before fusion, and reinforces AI module 4.
+6. **Keep models small.** Their 273 M-parameter network ran offline, while Trinetra-AI must run in real time (acceptance criterion). Compensation and noise models should be small (an MLP or small temporal CNN), and inference timing should be reported.
+7. **Expect poor transfer between platforms.** Changing sensor placement forced retraining. MagNav's sensors sit in different positions on the aircraft and the flights differ, so split by flight, and report whether a compensation model trained on one sensor transfers to another.
+8. **A future-work option: factor graphs.** Pose-graph and factor-graph back ends are a recognised alternative to filtering. Smoothing an ESKF trajectory with a factor graph is listed as future work, not baseline scope.
+
+---
+
+## C2. Kipf & Welling (2017): semi-supervised classification with graph convolutional networks
+
+**Citation.** T. N. Kipf and M. Welling, "Semi-Supervised Classification with Graph Convolutional Networks," *ICLR 2017* (arXiv:1609.02907).
+
+### Problem
+
+Classify the nodes of a graph, such as documents in a citation network, when only a small fraction of nodes are labelled (0.1–5 %). Earlier methods either assumed that linked nodes share labels (Laplacian regularisation) or used multi-step embedding pipelines (DeepWalk, Planetoid).
+
+### Method
+
+- **Starting point: spectral graph convolution,** g_θ ⋆ x = U g_θ Uᵀ x. Computing it is expensive (O(N²), plus an eigendecomposition).
+- **Simplification in three steps:**
+  1. Approximate the filter with Chebyshev polynomials (Hammond et al. 2011).
+  2. Truncate to first order (K = 1) and set λ_max ≈ 2.
+  3. Use a single shared parameter, plus a **renormalisation trick** that adds self-loops for numerical stability.
+- **Propagation rule:** H⁽ˡ⁺¹⁾ = σ(D̃^−½ Ã D̃^−½ H⁽ˡ⁾ W⁽ˡ⁾).
+  - Each layer mixes every node's features with its neighbours' features, normalised by node degree.
+  - Cost is linear in the number of edges.
+- **Model:** two layers, softmax output, cross-entropy on the labelled nodes only, full-batch training.
+
+### Results
+
+| Dataset | GCN accuracy | Best baseline |
+|---|---|---|
+| Citeseer | 70.3 % | ICA 69.1 % |
+| Cora | 81.5 % | Planetoid 75.7 % |
+| Pubmed | 79.0 % | Planetoid 77.2 % |
+| NELL | 66.0 % | Planetoid 61.9 % |
+
+- **Speed:** GCN also trains faster than Planetoid on three of the four datasets.
+- **Renormalisation:** the trick beat the Chebyshev and plain first-order variants.
+- **Depth:** 2–3 layers is best. Beyond about 7 layers, training needs residual connections.
+
+### Limitations
+
+- **Setting:** the tests are transductive (training and test nodes sit in one fixed graph) and use only undirected graphs.
+- **Memory:** full-batch training needs memory that grows with the graph.
+- **Weighting:** a node's own features and its neighbours' features are weighted equally.
+- **Domain:** there is no time-series, sensor or navigation application.
+
+### What Trinetra-AI takes from it
+
+1. **Scope.** GNNs are **future work** under the project's rules (CLAUDE.md), so this paper does not change the baseline plan. It is kept as the foundational GNN citation for the future-work section.
+2. **Candidate future uses**, each untested and with an obvious baseline to beat:
+   - **A graph of the aircraft's sensors.** MagNav records several magnetometers at different positions. A GCN over a sensor graph could share interference information between them during compensation. Compare against a plain MLP on concatenated channels: the paper's own MLP baseline did far worse (55.1 % vs 81.5 % on Cora), but only where the graph carries real information.
+   - **The anomaly map as a grid graph,** for learning which regions are informative for navigation (input to adaptive R). Compare against the simple map-gradient feature from B1.
+3. **Practical notes if it is ever used:**
+   - Use 2–3 layers.
+   - Check that the method works on graphs it wasn't trained on (inductive use), since the paper only tests within one graph.
+   - Implement in PyTorch. The paper's code uses TensorFlow, which this project excludes.
+
+---
+
 # Synthesis
 
 ## Magnetic-navigation papers compared
@@ -405,6 +540,8 @@ The foundations papers explain *why* this gap matters:
 - **A2:** EKFs become overconfident on beliefs with several peaks, and particle filters are sensitive to outliers.
 - **A3:** probabilistic models need only be approximately right, and learning them is the open problem.
 
+**C1** gives the closest precedent: learned, input-dependent covariances inside a classical estimator cut ATE from 0.348 m to 0.121 m in thermal-inertial SLAM. But those covariances needed hand-tuned scaling and were never tested for consistency. Trinetra-AI moves this idea to magnetic navigation and adds the missing calibration and NEES/NIS checks.
+
 ## Design decisions from this review
 
 | Decision | Source |
@@ -421,3 +558,8 @@ The foundations papers explain *why* this gap matters:
 | MagNav: confirm whether temporal-variation or base-station data is included | B1 |
 | Indoor extension: MagPIE replaces RoNIN; its live-load trials become the fault-detection test set | B2 |
 | Future work: plan routes over magnetically informative regions ("magnetic coastal navigation") | A3 |
+| AI module 2: learned, input-dependent R, ablated against fixed R; calibrate it and report NEES/NIS (C1 did neither) | C1 |
+| AI module 1: train by negative log-likelihood with mean + variance output; Huber loss for transient interference | C1 |
+| Keep learned models small and report inference time (real-time acceptance criterion) | C1 |
+| Test whether compensation transfers across sensors and flights; split by flight | C1 |
+| Future work: factor-graph smoothing back end; GCN over the sensor graph or map graph | C1, C2 |

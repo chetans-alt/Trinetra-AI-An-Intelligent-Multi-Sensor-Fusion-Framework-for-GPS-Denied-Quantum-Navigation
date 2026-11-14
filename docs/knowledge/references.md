@@ -60,6 +60,8 @@ Record each used dataset's licence in `datasets/README.md`.
 | Denoising IMU Gyroscopes with Deep Learning | Brossard, Bonnabel & Barrau, RA-L 2020 |
 | AI-IMU Dead-Reckoning | Brossard, Barrau & Bonnabel, IEEE T-IV 2020 |
 | VINet | Clark et al., AAAI 2017 |
+| Graph-based Thermal-Inertial SLAM with Probabilistic Neural Networks | Saputra et al., arXiv:2104.07196 (2021; venue to verify) — reviewed in [../literature-review.md](../literature-review.md) |
+| Semi-Supervised Classification with Graph Convolutional Networks | Kipf & Welling, ICLR 2017 — reviewed (future work: GNNs) |
 | AirIMU / EqNIO | Qiu et al., 2023 / Jayanth et al., 2024 — verify |
 
 ## Papers — ML foundations used by the modules
