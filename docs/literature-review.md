@@ -2,16 +2,188 @@
 
 How each paper informs Trinetra-AI's three stages: **compensate → match → fuse**. Numbers are quoted from the papers themselves; nothing here is a Trinetra-AI result.
 
-| # | Paper | Status |
+| # | Paper | Theme |
 |---|---|---|
-| 1 | — | not yet received (Drive link private) |
-| 2 | — | not yet received (Drive link private) |
-| 3 | Hanley et al., *MagPIE: A Dataset for Indoor Positioning with Magnetic Anomalies*, IPIN 2017 | reviewed |
-| 4 | Canciani & Raquet, *Absolute Positioning Using the Earth's Magnetic Anomaly Field*, NAVIGATION (ION), 2016 | reviewed |
+| A1 | Pei, Biswas, Fussell & Pingali, *An Elementary Introduction to Kalman Filtering*, arXiv:1710.04055 (v5, 2019) | estimation foundations: fusion (ESKF) |
+| A2 | Arulampalam, Maskell, Gordon & Clapp, *A Tutorial on Particle Filters for Online Nonlinear/Non-Gaussian Bayesian Tracking*, IEEE TSP 50(2), 2002 | estimation foundations: map matching (particle filter) |
+| A3 | Thrun, *Probabilistic Algorithms in Robotics*, CMU-CS-00-126, 2000; and Thrun, *Probabilistic Robotics*, Comm. ACM 45(3), 2002 | framing: Bayes filters, Monte Carlo localisation |
+| B1 | Canciani & Raquet, *Absolute Positioning Using the Earth's Magnetic Anomaly Field*, NAVIGATION (ION), 2016 | magnetic navigation (airborne) |
+| B2 | Hanley et al., *MagPIE: A Dataset for Indoor Positioning with Magnetic Anomalies*, IPIN 2017 | magnetic navigation (indoor dataset) |
+
+The two Thrun documents overlap heavily: the CACM article is a short version of the technical report. They are reviewed together as A3.
 
 ---
 
-## 4. Canciani & Raquet (2016): absolute positioning with the magnetic anomaly field
+# Part A: Estimation foundations
+
+## A1. Pei et al. (2019): an elementary introduction to Kalman filtering
+
+**Citation.** Y. Pei, S. Biswas, D. S. Fussell and K. Pingali, "An Elementary Introduction to Kalman Filtering," arXiv:1710.04055v5, 2019. If a peer-reviewed version is cited instead, check its venue first.
+
+### Problem
+
+Most introductions derive the Kalman filter from Bayesian inference with Gaussian noise. That hides which assumptions the filter actually needs, and leads to the common belief that the noise must be Gaussian.
+
+### Method
+
+The paper builds the Kalman filter from two elementary ideas.
+
+1. **Optimal linear fusion of uncorrelated estimates.** For two scalar estimates, the minimum-variance weight is K = σ₁²/(σ₁²+σ₂²); in other words, **each estimate is weighted by its precision**, 1/σ².
+   - The fused precision is the sum of the input precisions.
+   - Fusing n estimates one at a time loses nothing; this is why a *recursive* filter is optimal.
+   - For vectors: K = Σ₁(Σ₁+Σ₂)⁻¹ and Σ = (I−K)Σ₁.
+2. **The best linear unbiased estimator (BLUE)** for parts of the state that are never measured directly: ŷ = μ_y + Σ_yx Σ_xx⁻¹(x − μ_x).
+   - With an observation matrix H, this produces the standard update K = ΣHᵀ(HΣHᵀ+R)⁻¹. It is how hidden states, such as sensor biases, get corrected from measurements of other states.
+
+**The Kalman filter** = prediction (x̂ = Fx̂ + Bu, Σ = FΣFᵀ + Q) followed by this fusion step. The paper also gives the covariance update in its general form, (I−KH)Σ(I−KH)ᵀ + KRKᵀ, before simplifying it to (I−KH)Σ.
+
+### Key findings
+
+- **Gaussian noise is not required** for the Kalman filter to be the best *linear* unbiased estimator. With Gaussian noise it is the best of *all* unbiased estimators. With non-Gaussian noise, a nonlinear estimator can do better.
+- **The optimality rests on stated assumptions:**
+  - sensors are **unbiased** (no systematic error);
+  - process and measurement noise are **uncorrelated** with each other and over time;
+  - the covariances Q and R are known.
+- **Nonlinear extensions.** The EKF and UKF are described as heuristic extensions for nonlinear systems; the EKF linearises with Jacobians.
+
+### Limitations
+
+- It is a tutorial: the only worked example is a linear, two-state falling body.
+- There is no treatment of error-state filters, rotations or consistency testing.
+
+### What Trinetra-AI takes from it
+
+1. **Adaptive R is a precision weight.** The fusion weight is the measurement's precision, so a wrong R shifts trust to the wrong source. That is exactly what AI module 2 (adaptive R) exists to correct, and this paper gives the cleanest justification for it in the write-up.
+2. **Every violated assumption needs explicit handling:**
+
+   | Assumption | Where it breaks in Trinetra-AI | How the design handles it |
+   |---|---|---|
+   | Unbiased sensors | IMU biases; temporal magnetic variations | accel and gyro bias states in the ESKF; temporal-variation state in the particle filter (B1) |
+   | Uncorrelated noise | the particle filter's map fix and the ESKF share the same INS errors | inflate R or couple more tightly; verify with NEES/NIS (see B1) |
+   | Known Q and R | real noise drifts over time | tune Q from Allan variance (B2 data); learn R (AI module 2) |
+   | Gaussian, single-peaked belief | the map-matching likelihood has several peaks | use a particle filter for matching, not an EKF (see A2) |
+
+3. **Implementation:** use the general covariance update (Joseph form) for numerical stability, and build the first linear filters in week 1 from this paper's derivation.
+
+---
+
+## A2. Arulampalam et al. (2002): a tutorial on particle filters
+
+**Citation.** M. S. Arulampalam, S. Maskell, N. Gordon and T. Clapp, "A Tutorial on Particle Filters for Online Nonlinear/Non-Gaussian Bayesian Tracking," *IEEE Trans. Signal Processing*, 50(2):174–188, 2002.
+
+### Problem
+
+Online estimation when the dynamics or the measurements are nonlinear, or the noise is non-Gaussian. In those cases the exact Bayesian recursion has no closed form.
+
+### Content
+
+- **Optimal Bayesian recursion.** Prediction uses the Chapman–Kolmogorov equation; the update uses Bayes' rule.
+  - It is tractable only in two cases: linear-Gaussian systems (the Kalman filter) and finite state spaces (grid filters).
+- **Approximate methods:**
+  - **EKF:** linearises the models with Jacobians and keeps the belief Gaussian.
+  - **Approximate grid filters:** cost grows rapidly with state dimension, and resolution is fixed in advance.
+  - **Particle filters:** represent the belief with weighted samples.
+- **Sequential importance sampling (SIS).** Weights are updated as w ∝ w·p(z|x)p(x|x₋₁)/q(x|x₋₁,z).
+- **Degeneracy is unavoidable.** Weight variance only grows over time. Its severity is measured by the **effective sample size, N̂_eff = 1/Σwᵢ²**.
+- **Two remedies for degeneracy:**
+  1. A good **importance density** (the distribution new particles are drawn from). The optimal one is p(x|x₋₁,z); drawing from the motion model alone (the "prior") is common but wasteful.
+  2. **Resampling when N̂_eff < N_T.** The authors prefer **systematic resampling**, which runs in O(N) and adds the least Monte Carlo variance.
+- **The cost of resampling.** It causes **sample impoverishment**: particles collapse onto a few points, which is worst when process noise is small.
+- **Variants:**
+  - **SIR (bootstrap):** draws from the motion model and resamples every step. It is simple, but sensitive to outliers and loses diversity.
+  - **ASIR (auxiliary particle filter):** better when process noise is small.
+  - **RPF (regularised particle filter):** resamples from a kernel-smoothed posterior (Epanechnikov kernel, h_opt) to fight impoverishment.
+
+### Results
+
+A benchmark scalar nonlinear model with 50 particles, RMSE averaged over 100 Monte Carlo runs:
+
+| Filter | RMSE |
+|---|---|
+| EKF | 23.19 |
+| approximate grid (50 cells) | 6.09 |
+| SIR | 5.54 |
+| RPF | 5.55 |
+| ASIR | 5.35 |
+| "likelihood" particle filter | 5.30 |
+
+- **EKF failure mode.** On this two-peaked problem the EKF picks the wrong peak or sits between the peaks, and is **highly overconfident about a biased estimate**. The authors note this inconsistency is hard to detect online.
+- **The key design choice.** The authors' main lesson is that the importance density matters more than any other refinement.
+
+### Limitations
+
+- The tutorial uses only one scalar toy example; there are no navigation results.
+- The regularised filter's kernel is optimal only for equal weights and a Gaussian posterior, and works less well as the state dimension grows.
+
+### What Trinetra-AI takes from it
+
+1. **Why map matching uses a particle filter.** A magnetic map repeats similar anomaly values in many places, so the position belief has several peaks: exactly the case where the EKF failed (23.19 vs about 5.5). This is the justification for the particle filter in C6.
+2. **Improving on Canciani's resampling.** B1 resamples (SIR) after *every* measurement. The tutorial warns this loses diversity and is outlier-sensitive.
+   - Design: resample systematically only when N̂_eff falls below a threshold.
+   - Fall back to the regularised filter if particles collapse, which is likely because INS-error process noise is small.
+   - Log N̂_eff as a health signal.
+3. **Gate the fix before sending it to the ESKF.** The ESKF assumes a single-peaked Gaussian fix. Only send it when the particle cloud has a single peak (compact spread, healthy N̂_eff), and derive its covariance R from the particle spread. AI module 2 can then refine that R.
+4. **Outlier sensitivity sets a role for AI module 4.** Residual platform interference, or live loads as in B2, produces outlier measurements that SIR handles badly. A fault-detection module, or a heavy-tailed likelihood, protects the particle weights.
+5. **An evaluation idea.** Report EKF-vs-particle-filter matching on the same data as an ablation; the tutorial predicts the EKF will be overconfident, which NEES will expose.
+
+---
+
+## A3. Thrun (2000, 2002): probabilistic robotics
+
+**Citations.**
+- S. Thrun, "Probabilistic Algorithms in Robotics," Tech. Rep. CMU-CS-00-126, Carnegie Mellon University, 2000.
+- S. Thrun, "Probabilistic Robotics," *Communications of the ACM*, 45(3):52–57, 2002.
+
+The textbook of the same name (Thrun, Burgard & Fox, 2005) is already in [references.md](knowledge/references.md).
+
+### Problem
+
+Robots must act despite uncertain sensing, imperfect models and dynamic environments.
+
+### Central claim
+
+> "A robot that carries a notion of its own uncertainty and that acts accordingly, will do better than one that does not."
+
+### Content
+
+- **Probabilistic models.** Motion is modelled as p(x′|u,x) and sensing as p(z|x), replacing deterministic kinematics.
+- **The Bayes filter recursion,** b_t(s) = η p(o|s,m) ∫ p(s|a,s′,m) b_{t−1}(s′) ds′.
+  - It covers Markov localisation, Kalman filters, HMMs and dynamic Bayes networks, and rests on the Markov ("static world") assumption.
+- **Monte Carlo localisation (MCL).** A particle filter over pose given a map. It handles:
+  - **global localisation**, where the initial position is unknown;
+  - the **kidnapped-robot** case, recovering after the robot is moved without being told;
+  - beliefs with several peaks.
+
+  It works with crude models, because the uncertainty absorbs model error, and needs as few as about 100 samples with refinements. It can also adapt its sample count to the computing budget available.
+- **Mapping:**
+  - EKF-SLAM (O(N²) memory, O(N³) time; needs uniquely identifiable features);
+  - EM, which treats the path as a missing variable;
+  - occupancy grids with log-odds updates.
+- **Control:**
+  - POMDPs, which are intractable beyond small problems;
+  - **coastal navigation**, which plans with only (most likely state, entropy) and keeps the robot near features that keep it localised. It trades a longer path for a higher success rate.
+- **Evidence.** The museum robots Rhino and Minerva covered more than 60 km. Rhino had one major localisation failure in six days, which coincided with a sonar fault.
+
+### Limitations
+
+- These are survey and position papers with no controlled benchmarks.
+- The mild-violation claim about the Markov assumption is asserted, not quantified; the report itself lists its theory as an open problem.
+- The examples are indoor robots with laser and sonar sensors, not inertial or magnetic navigation.
+
+### What Trinetra-AI takes from it
+
+1. **Framing for the write-up.** Trinetra-AI *is* a Bayes filter, and magnetic map matching is MCL in which the map m is the anomaly map and p(z|s,m) is the magnetic likelihood. That places the project in a well-established line of work.
+2. **Where the static-world assumption fails.** Temporal magnetic variations (B1) and live loads (B2) both break it. The design answers each explicitly: a temporal-variation state for the first, fault detection for the second.
+3. **Initialisation.** Starting with map-wide particles (the global-localisation and kidnapped-robot cases) is a stress test worth adding after the baseline, which starts from the GPS/INS covariance as in B1.
+4. **Learning p(z|x) is the open area this project works in.** Thrun names learning probabilistic models as a key open area. Learned compensation (AI module 1) and learned R (AI module 2) are exactly that: learning parts of p(z|x).
+5. **Future work: magnetic coastal navigation.** Plan routes over magnetically informative regions (high map gradient) so the vehicle stays localised. This is listed as future work only, because the project scope is estimation, not planning.
+6. **Out of scope:** mapping and SLAM. The project uses existing anomaly maps.
+
+---
+
+# Part B: Magnetic-anomaly navigation
+
+## B1. Canciani & Raquet (2016): absolute positioning with the magnetic anomaly field
 
 **Citation.** A. Canciani and J. Raquet, "Absolute Positioning Using the Earth's Magnetic Anomaly Field," *NAVIGATION: Journal of the Institute of Navigation*, 2016 (Air Force Institute of Technology). The copy we have is an early-view print marked "Vol. 0, No. 0", so the final volume and pages need checking before citing.
 
@@ -42,7 +214,7 @@ The navigation filter is a **five-state particle filter** over INS *error* state
 - **Setup:** N = 1000 particles, initialised from the GPS/INS covariance at the moment GPS is lost.
 - **Weighting:** a Gaussian likelihood of the measured value Z(t) against the expected value. The expected value is the reference field IGRF(x_ins), plus a 24-hour diurnal baseline O_B(t), plus the interpolated map value, plus the particle's TV.
 - **Map lookup:** bivariate spline interpolation (SciPy).
-- **Resampling:** sequential importance resampling after **every** measurement.
+- **Resampling:** sequential importance resampling after **every** measurement (see A2 for why we change this).
 - **Removing temporal variations:**
   1. Subtract the monthly mean of the five quietest days recorded at an observatory.
   2. Model the remainder as FOGM.
@@ -74,21 +246,21 @@ The test is a **simulation built on real data**:
 1. **Blueprint for C6 map matching:**
    - state vector, Pinson dynamics and FOGM temporal-variation state;
    - likelihood (their eq. 11) and spline map lookup;
-   - SIR resampling and N = 1000 particles.
+   - N = 1000 particles.
 
-   Implement this first as the classical map-matching baseline.
+   Implement this first as the classical map-matching baseline, with the resampling changes from A2.
 2. **Expected accuracy:**
    - About 20 m is achievable at low altitude with clean data, and accuracy degrades with altitude.
    - MagNav flights vary in altitude, so we report error grouped by altitude.
 3. **Temporal variations are mandatory.** Ignoring them costs about 10× in accuracy. **Action:** check whether MagNav includes base-station or diurnal data. If it doesn't, fall back to the FOGM state.
 4. **The gap our AI module 1 fills.** This paper assumes the platform interference problem away. Testing on *real* platform magnetometer data, with Tolles-Lawson plus learned compensation, is the step it leaves open.
 5. **Inputs for adaptive R (AI module 2).** Error depends strongly on map gradient ("benign" areas), altitude and storm level. These are natural inputs for deciding how much to trust each map-match fix.
-6. **Design question raised.** In this paper the particle filter *is* the navigation filter. In our design, the particle filter's fix feeds an error-state Kalman filter (ESKF) as a measurement, so the two filters share errors. Treating the fix as independent would make the ESKF overconfident.
+6. **Design question raised.** In this paper the particle filter *is* the navigation filter. In our design, the particle filter's fix feeds an error-state Kalman filter (ESKF) as a measurement, so the two filters share errors. That breaks A1's uncorrelated-noise assumption, and treating the fix as independent would make the ESKF overconfident.
    - **Mitigation:** check consistency with NEES/NIS. If it fails, inflate R or move to a tighter coupling.
 
 ---
 
-## 3. Hanley et al. (2017): the MagPIE dataset
+## B2. Hanley et al. (2017): the MagPIE dataset
 
 **Citation.** D. Hanley, A. B. Faustino, S. D. Zelman, D. A. Degenhardt and T. Bretl, "MagPIE: A Dataset for Indoor Positioning with Magnetic Anomalies," *IPIN 2017* (University of Illinois at Urbana-Champaign). Dataset: bretl.csl.illinois.edu/magpie.
 
@@ -143,25 +315,40 @@ Indoor magnetic positioning methods couldn't be compared fairly, because earlier
 
 ---
 
-## Synthesis
+# Synthesis
+
+## Magnetic-navigation papers compared
 
 | | Canciani & Raquet 2016 | Hanley et al. 2017 | **Trinetra-AI** |
 |---|---|---|---|
 | Domain | airborne, crustal anomaly | indoor, building anomaly | airborne first (MagNav); indoor optional (MagPIE) |
 | Magnetometer data | **synthetic** (map + error model) | real, phone grade | **real platform data** (MagNav) |
 | Platform interference | ignored | handled by calibration only | **Tolles-Lawson + learned compensation** |
-| Estimator | particle filter over INS error states | grid-search MLE/MAP | particle-filter map matching → ESKF |
+| Estimator | particle filter over INS error states, resampling every step | grid-search MLE/MAP | particle filter (N̂_eff-triggered resampling) → gated fix → ESKF |
 | Map uncertainty | none | GPR variance | used as an input to adaptive R |
 | Reported metric | horizontal RMS error (m) | likelihood percentages | ATE/RTE, drift rate, NEES/NIS, with ablations |
 | Disturbances | temporal variations, storms | live loads | fault detection; adaptive trust |
 
-**The research gap.** Canciani shows that map matching works when the magnetometer signal is clean. MagPIE shows that real fields are disturbed and that maps have uncertainty. Neither paper measures how much **learned compensation of real platform interference**, combined with **uncertainty-aware trust in each fix**, improves end-to-end navigation error during a GPS outage. That is Trinetra-AI's central question.
+## The research gap
 
-**Concrete decisions from this review:**
-- **Baseline:** Canciani's five-state particle filter (with temporal variations) is the classical map-matching baseline.
-- **Metrics:** report horizontal RMS error grouped by altitude, alongside ATE/drift, so results are comparable with Canciani's.
-- **MagNav data check:** confirm whether MagNav includes temporal-variation or base-station data.
-- **Architecture risk:** the particle filter → ESKF cascade must pass NEES/NIS consistency checks.
-- **Indoor extension:** MagPIE replaces RoNIN, and its live-load trials become the fault-detection test set.
+Canciani shows that map matching works when the magnetometer signal is clean. MagPIE shows that real fields are disturbed and that maps have uncertainty. Neither paper measures how much **learned compensation of real platform interference**, combined with **uncertainty-aware trust in each fix**, improves end-to-end navigation error during a GPS outage. That is Trinetra-AI's central question.
 
-Papers 1 and 2 will be added when received.
+The foundations papers explain *why* this gap matters:
+- **A1:** a filter's weights are only as good as its stated noise.
+- **A2:** EKFs become overconfident on beliefs with several peaks, and particle filters are sensitive to outliers.
+- **A3:** probabilistic models need only be approximately right, and learning them is the open problem.
+
+## Design decisions from this review
+
+| Decision | Source |
+|---|---|
+| Classical map-matching baseline: Canciani's five-state particle filter with a temporal-variation state | B1 |
+| Resample systematically when N̂_eff < N_T, not every step; regularised particle filter if particles collapse; log N̂_eff | A2 |
+| Send the particle filter's fix to the ESKF only when the belief has a single peak; R from particle spread, refined by AI module 2 | A2, A1 |
+| Track IMU bias and temporal variations as states, because the filter's optimality assumes unbiased inputs | A1, B1 |
+| Check that the particle filter → ESKF cascade passes NEES/NIS, because its noises are correlated | A1, B1 |
+| Report horizontal RMS error grouped by altitude alongside ATE/drift, so results are comparable with Canciani | B1 |
+| Ablation: EKF vs particle-filter map matching | A2 |
+| MagNav: confirm whether temporal-variation or base-station data is included | B1 |
+| Indoor extension: MagPIE replaces RoNIN; its live-load trials become the fault-detection test set | B2 |
+| Future work: plan routes over magnetically informative regions ("magnetic coastal navigation") | A3 |
