@@ -145,7 +145,11 @@ After v1: the ESKF and the cascade ablation, tight coupling, the tactical-IMU sw
 - **Right-size the infrastructure.**
   - The PRD's M0 asks for DVC, MLflow, Docker and CI before any data is touched. Phase 11 also proposes TimescaleDB, Postgres and Redis.
   - Do not build these up front: the previous attempt stalled on infrastructure for 22 commits without reaching fusion.
-  - Start with git, pytest, ruff and Parquet files. Add MLflow when the first model trains, DVC when data needs versioning, and Docker or CI when ROS 2 arrives. TimescaleDB, Redis, Kafka and Spark are out of scope.
+  - Start with uv, git, pytest, hypothesis, ruff, pyright and Parquet files. Add more only on its trigger, per the approved plan (§5):
+    - GitHub Actions CI with the first filter-consistency test (S3).
+    - Per-run directories at the first NN, with MLflow only if sweeps become unmanageable.
+    - Docker when ROS 2 arrives (after v1).
+  - Never add DVC (the data can't be redistributed anyway), TimescaleDB, Redis, Kafka, Spark or Hydra.
 - **Research framing.**
   - The central question: does learned magnetic compensation, with adaptive trust in map-match fixes, reduce position error during GPS outages compared with INS plus Tolles-Lawson-based map matching in a well-tuned classical filter?
   - It is answered as a 2×2 ablation: Tolles-Lawson vs Tolles-Lawson + NN, crossed with fixed vs learned R.

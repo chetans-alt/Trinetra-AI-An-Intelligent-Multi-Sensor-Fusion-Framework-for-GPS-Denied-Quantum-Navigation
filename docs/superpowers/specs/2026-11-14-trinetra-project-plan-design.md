@@ -1,6 +1,6 @@
 # Trinetra-AI: project plan and design (v1)
 
-**Status:** draft for the author's approval, 2026-11-14.
+**Status:** approved by the author on 2026-11-14. The requirements view is in [docs/prd.md](../../prd.md).
 
 **How it was made:** a five-member planning panel produced it.
 - **Supervisor:** chair, who ruled on every disagreement.
