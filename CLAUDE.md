@@ -9,9 +9,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 It estimates position, velocity and orientation when GPS is unavailable. **Magnetic-anomaly navigation is the core** (decided 2026-11-14):
 - **Compensate:** remove the vehicle's own magnetic interference from the magnetometer, first with Tolles-Lawson, then with a learned neural correction on top.
 - **Match:** match the compensated anomaly signal against a crustal magnetic-anomaly map with a particle filter.
-- **Fuse:** feed the resulting position fix into an INS error-state Kalman filter, alongside barometer data and GPS when present.
+- **Navigate:** the particle filter is the navigator during GPS outages. It runs over INS error states and is driven by a simulated INS of declared grade (ADR-0001). Feeding the PF fix into an ESKF is kept only as a measured ablation, because it double-counts INS information.
 
-Further learned modules, such as adaptive noise, wrap the estimator. The "quantum" angle is that quantum magnetometers make this map matching more precise. The project covers software and AI only, not hardware.
+Exactly two learned modules wrap this: learned compensation and learned trust (R) for map fixes. The "quantum" angle is that quantum magnetometers make this map matching more precise. The project covers software and AI only, not hardware.
 
 This is the author's single portfolio and research project, aimed at sensor-fusion and navigation ML roles at deep-tech companies such as QuBeats, which builds navigation on the Earth's magnetic field. QuBeats sells its own fusion product also named "Trinetra"; this repo is independent of it and must never imply affiliation.
 
@@ -19,13 +19,16 @@ This is the author's single portfolio and research project, aimed at sensor-fusi
 
 - **Repository:** restarted from scratch on 2026-11-14 with a new `git init`. There is no code yet. `origin` is `github.com/chetans-alt/Trinetra-AI-An-Intelligent-Multi-Sensor-Fusion-Framework-for-GPS-Denied-Quantum-Navigation` (branch `main`).
 - **Old history:** a previous version (data adapters, preprocessing and features, but no fusion code) still exists in the GitHub repo `chetan7659/TrinetraAI-An-Intelligent-Multi-Sensor-Fusion-Framework-for-GPS-Denied-Quantum-Navigation`. That repo also holds the knowledge-source PDFs under `Knowledge Source/`. Never push this new history to it, or force-push, without the user's explicit confirmation.
-- **Environment:** development is on Windows. The `.venv` uses Python 3.14 and has numpy, pandas, h5py and pytest; activate it with `.venv\Scripts\Activate.ps1`. ROS 2 work needs WSL2 or Docker.
+- **Purpose:** a job portfolio, not a thesis. The author has 8 h/week and no GPU (CPU-only training); deadline not yet set.
+- **Environment:** development is on Windows. The old `.venv` is broken: its Python 3.14 base interpreter no longer exists. The target is **Python 3.12 managed by uv with a lockfile** (S0 rebuilds it). ROS 2 work, post-v1, needs WSL2 or Docker.
 - **Commands:** add build, lint and test commands here once they exist.
 
 ## Knowledge sources
 
 Read these before planning work. Where they disagree with this file, this file wins.
 
+- **[docs/superpowers/specs/2026-11-14-trinetra-project-plan-design.md](docs/superpowers/specs/2026-11-14-trinetra-project-plan-design.md):** the **approved project plan** (2026-11-14). It contains the panel rulings, system design, evaluation protocol, engineering standards, milestones S0–S7, and the risk register. It is the most binding source after this file.
+- **[docs/literature-review.md](docs/literature-review.md):** reviewed papers and the design decisions taken from them.
 - **`deep-research-report.md`** (in the repo): overview, reading list and 16-week plan. See the corrections below.
 - **[docs/knowledge/](docs/knowledge/README.md):** condensed markdown notes of every knowledge-source document below, with corrections marked inline. Read these instead of the PDFs.
 - **Knowledge-source PDFs, provided by the user (originals not in the repo):**
@@ -71,7 +74,7 @@ Read these before planning work. Where they disagree with this file, this file w
 
 - **Acceptance criteria:**
   - On at least two held-out GPS-denied trajectories, ATE and drift rate beat a documented inertial baseline.
-  - The system runs in real time, on a Jetson or in a documented simulation.
+  - The system runs in real time. For v1 this is shown as a real-time factor on a laptop CPU at 10 Hz; Jetson comes after v1.
   - Every headline number is reproduced by one scripted command from versioned code, data and config.
 - **Milestones**, each a vertical slice that ends in working, tested, tagged software:
 
@@ -99,9 +102,9 @@ Read these before planning work. Where they disagree with this file, this file w
   | `lat lon alt` | optional |
   | `baro` | Pa (optional) |
 
-  MagNav needs extra columns: the scalar total-field magnetometer readings (nT), the fluxgate vector readings, and the INS outputs. Add them when the MagNav adapter is written, after inspecting a real file.
+  For airborne data the core signal is the **scalar anomaly in nT**. The schema gains an airborne extension: scalar magnetometers, fluxgates, INS outputs, currents and line IDs. Define it after inspecting a real MagNav file.
 
-- **Preprocessing order:**
+- **Preprocessing order** (pedestrian/IMU data; for airborne data, Tolles-Lawson replaces steps 3–4, and gap masking still applies):
   1. Mask long gaps; never interpolate across them.
   2. Resample to a common grid.
   3. Remove bias using a static segment.
@@ -109,8 +112,10 @@ Read these before planning work. Where they disagree with this file, this file w
   5. Band-limit, with cut-offs chosen from the EDA spectra.
 - **Datasets:**
   - **Start with MagNav (DAF-MIT AIA).** It provides flight data with magnetometers, INS and GPS truth, plus anomaly maps. It is the primary dataset (this overrides the PRD's "start with RoNIN").
-  - **RoNIN** is an optional later extension for pedestrian and indoor navigation. It is research-licence only, with about half of it public.
-  - **Others:** MagPIE (indoor magnetic), TLIO, OxIOD, EuRoC, KITTI and comma2k19.
+  - **MagNav has no raw high-rate IMU data,** so strapdown mechanisation from raw IMU is impossible. The INS baseline is a Pinson error-model simulation on the GPS truth trajectory, with navigation grade as the headline.
+  - **MagNav licence conflict:** Zenodo says attribution/public domain; the MagNav.jl data-sharing agreement says non-profit research only, no redistribution. Follow the stricter terms: **never commit raw data, derived Parquet, map tiles or trained weights.** Use a download script with a SHA-256 manifest.
+  - **RoNIN** is out of v1. MagPIE is the preferred indoor extension, if one is ever added.
+  - **Others:** TLIO, OxIOD, EuRoC, KITTI and comma2k19.
   - **Licences:** record each dataset's licence in `datasets/README.md`.
 - **Evaluation rules:**
   - Judge every AI module by its effect on end-to-end ATE and drift, not by its own validation loss, and ablate it against the system without it.
@@ -118,25 +123,22 @@ Read these before planning work. Where they disagree with this file, this file w
   - Test with GPS masked as well as available.
   - Report filter consistency (NEES/NIS).
 
-## Proposed learn-by-building plan (16 weeks)
+## Approved plan (29 weeks at 8 h/week)
 
-The user accepted the MagNav-first direction on 2026-11-14, and this plan was re-ordered around it then. It replaces the user's original sequence, which spent weeks 1–6 relearning Python, ML and deep learning, which the user already uses at work.
+Approved 2026-11-14. It replaces the earlier 16-week plan; the full plan is in the spec linked above.
 
-| Weeks | Learn | Build |
+| Weeks | Slice | Exit criterion (summary) |
 |---|---|---|
-| 1 | Probability refresher; Labbe *Kalman and Bayesian Filters in Python*, ch. 1–6 | repo skeleton; 1-D and 2-D KF on simulated data |
-| 2 | Geomagnetism basics: total field, crustal anomaly, IGRF, diurnal variation; MagNav paper (Gnadt et al. 2023) | MagNav adapter → canonical Parquet; EDA of flight lines |
-| 3 | Tolles-Lawson model; DSP: Butterworth band-limiting, resampling | Tolles-Lawson compensation baseline, scored by RMSE (nT) against the reference magnetometer |
-| 4–5 | Rotations and quaternions (Solà, arXiv 1711.02508); INS error models; Allan variance | 3-D strapdown INS; INS-only drift baseline on MagNav flights |
-| 6–7 | Error-state KF; NEES/NIS; ATE/RTE metrics | ESKF fusing INS and GPS, with GPS-outage masking; evaluation harness |
-| 8–9 | Particle filters; map matching | particle-filter magnetic map matching; fixes fed into the ESKF (INS + Tolles-Lawson baseline) |
-| 10–11 | Learned magnetic compensation (MagNav challenge approaches) | AI module 1: neural compensation on top of Tolles-Lawson; ablated against Tolles-Lawson alone |
-| 12–13 | Adaptive noise estimation; uncertainty calibration | AI module 2: adaptive R for map-match fixes, driven by innovations and map informativeness |
-| 14 | Time-series anomaly detection | AI module 3: fault detection on map-match fixes, or the RoNIN pedestrian extension |
-| 15 | Streamlit, Plotly | dashboard with ablation results |
-| 16 | — | write-up, benchmark README, apply to QuBeats |
+| 1–2 | **S0 Setup:** uv + Python 3.12, skeleton, ADR-0001 to 0003, download script, licence email | pytest and ruff pass; the core import-rule test works |
+| 3–5 | **S1 Data + EDA:** MagNav adapter, maps, line segmentation, `ins_*` free-inertial test, anomaly-floor table | IGRF identity holds within 0.01 nT; splits fixed in an ADR |
+| 6–8 | **S2 Classical compensation:** 18-term Tolles-Lawson and ridge-TL, cross-checked against MagNav.jl | Mag 1 reproduces `mag_1_c` to within a few nT |
+| 9–11 | **S3 INS simulator + outage harness + CI** | Pinson drift matches theory within 10% |
+| 12–17 | **S4 Magnetic navigation (v0.1, the minimum shippable portfolio):** PF navigator, map model, NIS gate, headline figure | bounded error over 30-min outages on test flights 1003 and 1007 |
+| 18–22 | **S5 AI-1:** learned residual compensation (ensemble, ≤50k params, CPU) | beats ridge-TL; calibrated |
+| 23–26 | **S6 AI-2:** learned R vs fixed, PF-spread and Sage-Husa R; full 2×2 | NIS within band |
+| 27–29 | **S7 Write-up (v1.0):** error budget, sensor-noise ("quantum") sweep | a fresh clone reproduces the results |
 
-ROS 2 and C++ come afterwards, as a port of the finished ESKF.
+After v1: the ESKF and the cascade ablation, tight coupling, the tactical-IMU sweep, the 2021 flights, then ROS 2 and C++.
 
 ## Corrections and scope rules (override the knowledge sources)
 
@@ -146,18 +148,18 @@ ROS 2 and C++ come afterwards, as a port of the finished ESKF.
   - Start with git, pytest, ruff and Parquet files. Add MLflow when the first model trains, DVC when data needs versioning, and Docker or CI when ROS 2 arrives. TimescaleDB, Redis, Kafka and Spark are out of scope.
 - **Research framing.**
   - The central question: does learned magnetic compensation, with adaptive trust in map-match fixes, reduce position error during GPS outages compared with INS plus Tolles-Lawson-based map matching in a well-tuned classical filter?
-  - Baselines, in order: INS only; INS + map matching with Tolles-Lawson; INS + map matching with learned compensation; plus adaptive R.
+  - It is answered as a 2×2 ablation: Tolles-Lawson vs Tolles-Lawson + NN, crossed with fixed vs learned R.
+  - Reference rows: INS only; the stinger Mag 1 upper bound; R from PF spread; Sage-Husa adaptive R. Learned modules must beat the classical baselines, not only fixed R.
   - GPS serves as ground truth and as a source of simulated outages, not as a fused input during evaluation.
-- **AI module priority:**
-  1. Learned magnetic compensation (a neural correction on top of Tolles-Lawson).
-  2. Confidence → adaptive R and weights for map-match fixes.
-  3. Drift / bias prediction.
-  4. Anomaly and fault detection (one module).
-  5. Denoising.
-  6. Health monitoring.
-  7. Trajectory prediction.
+  - **Compensation reference:** `mag_1_c` minus diurnal minus IGRF. It is a reference, not ground truth. **The map is never a training target.**
+  - **Never NN inputs:** latitude, longitude, time, map value, GPS or stinger data.
+  - IGRF is evaluated at the *estimated* position.
+- **Exactly two AI modules:**
+  1. Learned residual compensation on top of Tolles-Lawson.
+  2. Learned R scale for map fixes.
 
-  GANs and VAEs, reinforcement learning, GNNs and XAI are future work. Use PyTorch only; no TensorFlow.
+  Fault detection is a classical χ² test on NIS. Drift prediction, denoising, health monitoring and trajectory prediction are cut. GANs and VAEs, reinforcement learning, GNNs and XAI are future work. Use PyTorch only; no TensorFlow.
+- **No Week-1 toy filters.** Every week ends in project software.
 - **No overclaims.** Magnetic aiding bounds drift; it does not make navigation "drift-free", even though the phase notes and the report say so.
 - **Citations.**
   - **Never cite:** "Thompson et al. 2019", which the report itself labels hypothetical.
