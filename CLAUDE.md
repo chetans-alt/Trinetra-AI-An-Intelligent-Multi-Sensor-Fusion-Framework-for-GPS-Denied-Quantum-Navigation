@@ -12,7 +12,7 @@ This is the author's single portfolio and research project, aimed at sensor-fusi
 
 ## Current state
 
-- **Repository:** restarted from scratch on 2026-11-14 with a new `git init`. There is no code yet and no remote.
+- **Repository:** restarted from scratch on 2026-11-14 with a new `git init`. There is no code yet. `origin` is `github.com/chetans-alt/Trinetra-AI-An-Intelligent-Multi-Sensor-Fusion-Framework-for-GPS-Denied-Quantum-Navigation` (branch `main`).
 - **Old history:** a previous version (data adapters, preprocessing and features, but no fusion code) still exists in the GitHub repo `chetan7659/TrinetraAI-An-Intelligent-Multi-Sensor-Fusion-Framework-for-GPS-Denied-Quantum-Navigation`. That repo also holds the knowledge-source PDFs under `Knowledge Source/`. Never push this new history to it, or force-push, without the user's explicit confirmation.
 - **Environment:** development is on Windows. The `.venv` uses Python 3.14 and has numpy, pandas, h5py and pytest; activate it with `.venv\Scripts\Activate.ps1`. ROS 2 work needs WSL2 or Docker.
 - **Commands:** add build, lint and test commands here once they exist.
