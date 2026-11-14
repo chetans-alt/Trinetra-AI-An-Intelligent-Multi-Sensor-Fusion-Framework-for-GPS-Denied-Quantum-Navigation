@@ -6,8 +6,8 @@ Collected from all knowledge sources. "Verify" means confirm DOI/venue/licence o
 
 | Dataset | Sensors | Ground truth | Best for | Note |
 |---|---|---|---|---|
-| **RoNIN** | phone IMU + mag, 200 Hz | 3-D trajectory | **start here**; learned inertial | research licence, ~50 % public, 42.7 h, >100 subjects (Herath et al., ICRA 2020) |
-| **MagNav (DAF-MIT AIA)** | aeromagnetic + INS | flight reference | **required** for the magnetic path | Gnadt et al., 2023; github.com/MIT-AI-Accelerator/MagNav.jl |
+| **MagNav (DAF-MIT AIA)** | aeromagnetic + INS | flight reference | **start here** (primary; magnetic compensation + map matching) | Gnadt et al., 2023; github.com/MIT-AI-Accelerator/MagNav.jl |
+| RoNIN | phone IMU + mag, 200 Hz | 3-D trajectory | optional pedestrian extension | research licence, ~50 % public, 42.7 h, >100 subjects (Herath et al., ICRA 2020) |
 | TLIO | headset IMU | VIO | learned displacement + EKF | Liu et al., RA-L 2020; github.com/CathIAS/TLIO |
 | OxIOD | IMU (accel/gyro/mag) | Vicon/VI | inertial baselines | Chen et al., 2018 |
 | EuRoC MAV | IMU + stereo | Vicon/Leica | VIO, fusion | Burri et al., 2016 |
